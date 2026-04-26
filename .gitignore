@@ -1,0 +1,31 @@
+# West / NCS
+.west/
+nrf/
+zephyr/
+bootloader/
+modules/
+tools/
+nrfxlib/
+test/
+*.egg-info/
+
+# Build
+build/
+build_*/
+twister-out/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Keys (never commit production private keys)
+app/keys/*.pem
+keys/*.pem
+!keys/README.md
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+Thumbs.db

@@ -1,0 +1,16 @@
+# nRF Connect SDK west manifest — full workspace for Secure A/B OTA (nRF52840 DK).
+# Setup (from this repo root):
+#   west init -l .
+#   west update
+manifest:
+  remotes:
+    - name: ncs
+      url-base: https://github.com/nrfconnect
+  projects:
+    - name: nrf
+      remote: ncs
+      repo-path: sdk-nrf
+      revision: v3.2.4
+      import: true
+  self:
+    path: .
