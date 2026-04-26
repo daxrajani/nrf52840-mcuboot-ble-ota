@@ -63,19 +63,28 @@ Partition layout is pinned in `app/pm_static_nrf52840dk_nrf52840.yml` to prevent
 
 ## Repository Setup (one-time)
 
+> **Step 0 — generate your signing key first.** The build will fail with a CMake fatal error if `app/keys/mcuboot.pem` does not exist. Run the key generation script before anything else.
+
 ```powershell
-# From the repo root: D:\Secure_AB_OTA_Bootloader
+# From the repo root
 west update
 west zephyr-export
 .\scripts\setup_dev_keys.ps1
 ```
 
-`setup_dev_keys.ps1` generates `app/keys/mcuboot.pem` (ECDSA P-256 private key) using `imgtool keygen`. If `imgtool` is not on PATH, it falls back to OpenSSL. **This key is the root of trust — back it up and never commit it to version control.**
+```bash
+# Linux / macOS
+west update
+west zephyr-export
+./scripts/setup_dev_keys.sh
+```
+
+`setup_dev_keys` generates `app/keys/mcuboot.pem` (ECDSA P-256 private key) using `imgtool keygen`, falling back to OpenSSL if imgtool is not on PATH. **This key is the root of trust — back it up and never commit it to version control.**
 
 Manual key generation (if scripts are unavailable):
 
-```powershell
-openssl ecparam -name prime256v1 -genkey -noout -out app\keys\mcuboot.pem
+```bash
+openssl ecparam -name prime256v1 -genkey -noout -out app/keys/mcuboot.pem
 ```
 
 ---
@@ -87,8 +96,14 @@ Version and BLE name are passed via **environment variables** because the applic
 ### Build v1.0.0 (baseline — flash to device)
 
 ```powershell
+# Windows (PowerShell / NCS terminal)
 $env:APP_FIRMWARE_VERSION="1.0.0"; $env:APP_BLE_NAME="Dax_BLE_v1"
 west build --sysbuild -b nrf52840dk/nrf52840 app -d build_v100 -p always
+```
+
+```bash
+# Linux / macOS
+APP_FIRMWARE_VERSION=1.0.0 APP_BLE_NAME=Dax_BLE_v1 west build --sysbuild -b nrf52840dk/nrf52840 app -d build_v100 -p always
 ```
 
 ### Build v2.0.0 (OTA target)
@@ -96,6 +111,10 @@ west build --sysbuild -b nrf52840dk/nrf52840 app -d build_v100 -p always
 ```powershell
 $env:APP_FIRMWARE_VERSION="2.0.0"; $env:APP_BLE_NAME="DAX_OTA_V2"
 west build --sysbuild -b nrf52840dk/nrf52840 app -d build_v200 -p always
+```
+
+```bash
+APP_FIRMWARE_VERSION=2.0.0 APP_BLE_NAME=DAX_OTA_V2 west build --sysbuild -b nrf52840dk/nrf52840 app -d build_v200 -p always
 ```
 
 Use the same pattern for any version. The version string is embedded in the binary, passed to `imgtool sign`, and printed by the app at boot.
@@ -118,16 +137,28 @@ west flash -d build_v100 --runner nrfjprog
 
 ## UART Logs
 
+Install pyserial if not already present:
+
+```bash
+pip install pyserial
+```
+
 Find the JLink CDC COM port:
 
 ```powershell
+# Windows
 Get-CimInstance Win32_SerialPort | Select-Object DeviceID, Name
+```
+
+```bash
+# Linux / macOS
+ls /dev/tty.usbmodem* /dev/ttyACM* 2>/dev/null
 ```
 
 Open terminal (115200 8N1):
 
-```powershell
-python -m serial.tools.miniterm COMx 115200
+```bash
+python -m serial.tools.miniterm <PORT> 115200
 ```
 
 Expected output on a clean v1.0.0 boot:
@@ -148,7 +179,7 @@ I: Image version: v1.0.0
 
 1. Flash `build_v100/merged.hex` (v1.0.0 base).
 2. Open **nRF Connect** → scan → connect to `Dax_BLE_v1`.
-3. Go to **DFU** tab → select `build_v200\app\zephyr\zephyr.signed.bin`.
+3. Go to **DFU** tab → select `build_v200/app/zephyr/zephyr.signed.bin`.
 4. Tap **Open** then **Start** — the upload takes ~30–60 seconds over BLE.
 5. The device resets automatically when the upload completes (no physical reset needed).
 6. MCUboot validates the ECDSA P-256 signature, performs the swap, and boots v2.0.0.
@@ -163,7 +194,6 @@ secure_ble_ota: DFU_PENDING — slot-1 upload complete; image test-pending set
 secure_ble_ota: MCUmgr OS RESET (SMP) force=0 delay_ms=250 -> warm reboot (SREQ)
 
 # --- MCUboot performs swap ---
-I: Primary image: magic=unset, swap_type=0x1, copy_done=0x3, image_ok=0x3
 I: Image index: 0, Swap type: test
 I: Starting swap using scratch algorithm.
 I: Image version: v2.0.0
@@ -199,22 +229,25 @@ OTA with this binary. The new image will `k_panic()` before calling `boot_write_
 After building, confirm the correct values were embedded:
 
 ```powershell
-# Version and BLE name
+# Windows
 Select-String "APP_FIRMWARE_VERSION|APP_BLE_NAME" .\build_v200\app\CMakeCache.txt
-
-# Signing key used by the app (imgtool)
 Select-String "SIGNATURE_KEY" .\build_v200\app\zephyr\.config
-
-# Verification key compiled into MCUboot
 Select-String "BOOT_SIGNATURE_KEY" .\build_v200\mcuboot\zephyr\.config
+```
+
+```bash
+# Linux / macOS
+grep -E "APP_FIRMWARE_VERSION|APP_BLE_NAME" build_v200/app/CMakeCache.txt
+grep "SIGNATURE_KEY" build_v200/app/zephyr/.config
+grep "BOOT_SIGNATURE_KEY" build_v200/mcuboot/zephyr/.config
 ```
 
 Both key paths must point to `app/keys/mcuboot.pem`. A mismatch means MCUboot will reject the OTA image at signature verification.
 
 Verify the signed binary directly:
 
-```powershell
-imgtool verify -k app\keys\mcuboot.pem build_v200\app\zephyr\zephyr.signed.bin
+```bash
+imgtool verify -k app/keys/mcuboot.pem build_v200/app/zephyr/zephyr.signed.bin
 ```
 
 ---
@@ -229,25 +262,44 @@ imgtool verify -k app\keys\mcuboot.pem build_v200\app\zephyr\zephyr.signed.bin
 
 ---
 
+## Engineering Decisions & Challenges
+
+**Static partition map instead of NCS auto-PM.**
+NCS's partition manager recalculates region addresses whenever `CONFIG_*` options change the MCUboot binary size. That is safe during development but dangerous in production — a routine Kconfig change can silently shift the secondary slot address, causing every field-deployed device to refuse the next OTA because the upgrade lands at the wrong offset. `pm_static_nrf52840dk_nrf52840.yml` locks all addresses, trading flexibility for predictability. Any future resizing requires an explicit, reviewed change to the partition file.
+
+**Sysbuild ExternalProject cmake isolation.**
+In Zephyr sysbuild, the application cmake runs as a separate `ExternalProject` subprocess. cmake `-D` arguments passed on the west command line are visible only to the top-level sysbuild cmake — they never reach the application cmake. The standard workaround (pass `-DAPP_FIRMWARE_VERSION=2.0.0` after `--`) silently fails; the application always sees the default. The fix is to read `$ENV{APP_FIRMWARE_VERSION}` inside the application `CMakeLists.txt`, because environment variables are inherited by subprocess cmake. Similarly, `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` must be injected via `SB_EXTRA_CONF_FILE` *before* `find_package(Sysbuild)` — setting it afterwards is too late because `ExternalZephyrProject_Cmake()` runs inside `find_package` and has already written the child image Kconfig by the time user code after `find_package` executes.
+
+**OTA reset guard for premature mobile resets.**
+Several BLE DFU client implementations (including nRF Connect on some iOS versions) send an `os_mgmt` reset command immediately after connecting, before the image upload has started. Without a guard, this resets the device at 0% transfer. The guard in `main.c` blocks `os_mgmt` resets unless `img_dfu_active` (upload in progress), `img_dfu_pending` (upload just finished), or `mcuboot_swap_type() == BOOT_SWAP_TYPE_TEST` (slot 1 already has a pending image — the downgrade case where nRF Connect re-marks an existing slot-1 image as test via state_write without re-uploading). The third condition was discovered when testing downgrade: `DFU_STARTED`/`DFU_PENDING` events never fire for state_write-only flows, so flags alone are insufficient.
+
+**Image confirmation timing with active BLE connection.**
+After MCUboot test-swaps a new image, the nRF Connect app reconnects immediately to verify the version string. If image confirmation is deferred until after disconnect (a common pattern), `boot_write_img_confirmed()` never runs before the next reset and MCUboot reverts the image. The fix is to confirm while connected — the nRF52840 SoftDevice Controller handles flash/radio arbitration in hardware, so a single-byte `image_ok` write is safe during an active BLE connection. A 2-second initial delay protects the first connection window; after that, confirmation proceeds regardless of connection state.
+
+**Key propagation through the signing chain.**
+MCUboot is compiled with a public verification key. The OTA binary is signed with the corresponding private key via `imgtool`. If these keys diverge — as happens when the NCS default key (`root-ec-p256.pem`) is used for signing but a custom key was compiled into MCUboot, or vice versa — MCUboot silently discards the slot-1 image rather than logging a swap failure, making the failure mode appear identical to "no image uploaded." The fix is a single source of truth: `app/keys/mcuboot.pem` is referenced by both the app cmake (for `imgtool sign`) and the sysbuild cmake (for `CONFIG_BOOT_SIGNATURE_KEY_FILE` in MCUboot). Any key change requires a full rebuild and reflash of both images.
+
+---
+
 ## Repository Layout
 
 ```
-├── west.yml                          # NCS v3.2.4 workspace manifest
+├── west.yml                               # NCS v3.2.4 workspace manifest
 ├── app/
-│   ├── CMakeLists.txt                # Build logic: version/name env vars, key path, EXTRA_CONF_FILE
-│   ├── prj.conf                      # Application Kconfig (BLE, MCUmgr, SMP, hooks, flash)
-│   ├── sysbuild.conf                 # Sysbuild: enable MCUboot, swap-scratch, ECDSA P-256
+│   ├── CMakeLists.txt                     # Build logic: version/name env vars, key path, EXTRA_CONF_FILE
+│   ├── prj.conf                           # Application Kconfig (BLE, MCUmgr, SMP, hooks, flash)
+│   ├── sysbuild.conf                      # Sysbuild: enable MCUboot, swap-scratch, ECDSA P-256
 │   ├── sysbuild/
-│   │   ├── CMakeLists.txt            # Key path injection via SB_EXTRA_CONF_FILE (before find_package)
-│   │   └── mcuboot.conf              # MCUboot child-image config (UART logging, signature type)
+│   │   ├── CMakeLists.txt                 # Key path injection via SB_EXTRA_CONF_FILE (before find_package)
+│   │   └── mcuboot.conf                   # MCUboot child-image config (UART logging, signature type)
 │   ├── pm_static_nrf52840dk_nrf52840.yml  # Static partition map (pinned addresses)
 │   ├── keys/
-│   │   └── mcuboot.pem               # ECDSA P-256 signing key (gitignored — generate locally)
+│   │   └── mcuboot.pem                    # ECDSA P-256 signing key (gitignored — generate locally)
 │   └── src/
-│       └── main.c                    # BLE peripheral, SMP, DFU hooks, image confirmation
+│       └── main.c                         # BLE peripheral, SMP, DFU hooks, image confirmation
 └── scripts/
-    ├── setup_dev_keys.ps1            # Key generation (Windows/PowerShell)
-    └── setup_dev_keys.sh             # Key generation (Linux/macOS)
+    ├── setup_dev_keys.ps1                 # Key generation (Windows/PowerShell)
+    └── setup_dev_keys.sh                  # Key generation (Linux/macOS)
 ```
 
 ---
@@ -270,15 +322,15 @@ CI validates that the signing pipeline is intact. It does not run hardware tests
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
+| `Missing mcuboot.pem` cmake fatal error | Key not generated | Run `setup_dev_keys.ps1` / `setup_dev_keys.sh` before building |
 | `west: command not found` | Not in NCS terminal | Launch terminal from Toolchain Manager |
 | No UART output after flash | Flashed app-only hex | Always flash `build_vXXX/merged.hex` via `west flash -d build_vXXX` |
-| `E: Image in the secondary slot is not valid!` | Key mismatch between MCUboot and OTA binary | Rebuild both base and OTA firmware from the same clean build; verify `BOOT_SIGNATURE_KEY_FILE` matches in both `.config` files |
-| Upload completes but no swap | Old `build/` used wrong NCS default key | Delete stale build dirs; always rebuild with `setup_dev_keys.ps1` key in place |
+| `E: Image in the secondary slot is not valid!` | Key mismatch between MCUboot and OTA binary | Rebuild both base and OTA firmware; verify `BOOT_SIGNATURE_KEY_FILE` matches in both `.config` files |
+| Upload completes but no swap, no error logged | Stale build used wrong NCS default key | Delete all `build_*/` dirs; rebuild after running key setup script |
 | Device resets immediately at 0% upload | nRF Connect sends early OS reset | Handled automatically by the reset guard in `main.c` |
-| Physical reset required after OTA | `img_dfu_pending` flag not set | Rebuilt firmware includes fix; OS reset is now allowed after `DFU_PENDING` |
-| Downgrade (v2→v1) reset blocked | No DFU upload, only state_write | Fixed: reset guard also checks `mcuboot_swap_type() == BOOT_SWAP_TYPE_TEST` |
-| `Missing mcuboot.pem` cmake error | Key not generated | Run `.\scripts\setup_dev_keys.ps1` |
-| Version always shows `1.0.0` | Forgot to set env vars | Set `$env:APP_FIRMWARE_VERSION` before `west build` |
+| Physical reset required after OTA | Old firmware without `img_dfu_pending` fix | Rebuild from current source |
+| Downgrade reset blocked | No DFU upload, only state_write | Handled by `mcuboot_swap_type() == BOOT_SWAP_TYPE_TEST` check in reset guard |
+| Version always shows `1.0.0` | Env var not set before build | Set `$env:APP_FIRMWARE_VERSION` (PowerShell) or `APP_FIRMWARE_VERSION=x.y.z` (bash) before `west build` |
 
 ---
 
